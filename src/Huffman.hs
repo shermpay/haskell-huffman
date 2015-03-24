@@ -33,10 +33,19 @@ printTree = printTreeAux 0
             putStrLn (nSpaces n ++ (show x))
             printTreeAux (n + 2) l
             printTreeAux (n + 2) r
-          printTreeAux n (Node (Nothing) l r) = do
+          printTreeAux n (Node Nothing l r) = do
             putStrLn (nSpaces n ++ "$")
             printTreeAux (n + 2) l
             printTreeAux (n + 2) r
+                         
+encodeTree :: Tree a -> [(a, [Int])]
+encodeTree tree = 
+    let encoding = treeEncodingAux [] [] tree
+    in map (\(Just x, en) -> (x, en)) encoding
+    where treeEncodingAux enc bits (Node (Just x) _ _) = (Just x, bits):enc
+          treeEncodingAux enc bits (Node Nothing l r) = lres ++ rres
+              where lres = (treeEncodingAux enc (0:bits) l)
+                    rres = (treeEncodingAux enc (1:bits) r)
 
 listToPQ :: (Ord k) => [(k, a)] -> PQueue.MinPQueue k (Tree a)
 listToPQ = PQueue.fromList . map (\(k, x) -> (k, leafNode x))
@@ -63,3 +72,6 @@ pqToTree pq =
           Nothing -> error "Priority Queue should have 1 element"
     else
         pqToTree $ pqMerge pq
+
+listToTree :: (Ord k, Num k) => [(k, a)] -> (Tree a)
+listToTree = pqToTree . listToPQ
