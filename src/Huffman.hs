@@ -85,6 +85,9 @@ decodeSymbol (sym, []) _ = leafNode sym
 
 bitsPath :: [Int] -> [Direction]
 bitsPath = map toEnum 
+           
+pathBits :: [Direction] -> [Int]
+pathBits = map fromEnum 
 
 -- Decode an encoding into a Huffman tree
 decodeTree :: [(a, [Direction])] -> Tree a
@@ -119,8 +122,11 @@ pqToTree pq =
 listToTree :: (Ord k, Ord a, Num a) => [(k, a)] -> (Tree k)
 listToTree = pqToTree . listToPQ
              
-huffmanEncode :: (Ord k) => [k] -> Tree k
-huffmanEncode = pqToTree . mapToPQ . countFreqs
+huffmanTree :: (Ord k) => [k] -> Tree k
+huffmanTree = pqToTree . mapToPQ . countFreqs
+                
+huffmanEncode :: (Ord k) => [k] -> Map.Map k [Int]
+huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, pathBits dirs)) . encodeTree . huffmanTree
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
@@ -135,6 +141,8 @@ main = do
   args <- Env.getArgs
   case length args of
     1 -> do contents <- IO.readFile fileName
+            let encoding = huffmanEncode contents
+            print encoding
             return ()
         where fileName = args !! 0
     _ -> usage 
