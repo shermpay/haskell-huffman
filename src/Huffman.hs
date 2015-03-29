@@ -6,6 +6,11 @@ import qualified Data.Map as Map
 import qualified Data.PQueue.Prio.Min as PQueue
 import qualified Data.Bits as Bits
 
+
+import qualified Data.List as List
+import qualified System.Environment as Env
+import qualified System.IO as IO
+
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
               deriving (Show, Eq)
@@ -81,14 +86,15 @@ decodeSymbol (sym, []) _ = leafNode sym
 bitsPath :: [Int] -> [Direction]
 bitsPath = map toEnum 
 
+-- Decode an encoding into a Huffman tree
 decodeTree :: [(a, [Direction])] -> Tree a
 decodeTree = foldr decodeSymbol Null
 
-listToPQ :: (Ord k) => [(k, a)] -> PQueue.MinPQueue k (Tree a)
-listToPQ = PQueue.fromList . map (\(k, x) -> (k, leafNode x))
+listToPQ :: (Ord a) => [(k, a)] -> PQueue.MinPQueue a (Tree k)
+listToPQ = PQueue.fromList . map (\(k, x) -> (x, leafNode k))
 
-mapToPQ :: (Ord k) => Map.Map k a -> PQueue.MinPQueue k (Tree a)
-mapToPQ = PQueue.fromList . map (\(k, x) -> (k, leafNode x)) . Map.toList
+mapToPQ :: (Ord k, Ord a) => Map.Map k a -> PQueue.MinPQueue a (Tree k)
+mapToPQ = PQueue.fromList . map (\(k, x) -> (x, leafNode k)) . Map.toList
               
 pqTakeTwo :: (Ord k, Num k) => PQueue.MinPQueue k (Tree a) -> 
              (k, (Tree a), (Tree a), PQueue.MinPQueue k (Tree a))
@@ -110,5 +116,25 @@ pqToTree pq =
     else
         pqToTree $ pqMerge pq
 
-listToTree :: (Ord k, Num k) => [(k, a)] -> (Tree a)
+listToTree :: (Ord k, Ord a, Num a) => [(k, a)] -> (Tree k)
 listToTree = pqToTree . listToPQ
+             
+huffmanEncode :: (Ord k) => [k] -> Tree k
+huffmanEncode = pqToTree . mapToPQ . countFreqs
+
+countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
+countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
+
+usage :: IO()
+usage = do
+  progName <- Env.getProgName
+  putStrLn $ foldr (++) "" $ List.intersperse " " ["Usage:", "./" ++ progName, "FILE"]
+
+main :: IO()
+main = do
+  args <- Env.getArgs
+  case length args of
+    1 -> do contents <- IO.readFile fileName
+            return ()
+        where fileName = args !! 0
+    _ -> usage 
