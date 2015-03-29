@@ -4,16 +4,24 @@
 
 import qualified Data.Map as Map
 import qualified Data.PQueue.Prio.Min as PQueue
+import qualified Data.Bits as Bits
 
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
               deriving (Show, Eq)
+
+data Direction = LDir
+               | RDir
+                 deriving (Show, Enum)
                        
-leafNode :: a -> (Tree a)
+leafNode :: a -> Tree a
 leafNode x = Node (Just x) Null Null
              
-emptyNode :: a -> a -> (Tree a)
-emptyNode l r = Node Nothing (leafNode l) (leafNode r)
+emptyNode :: Tree a -> Tree a -> Tree a
+emptyNode l r = Node Nothing l r
+                
+emptyLeaf :: Tree a
+emptyLeaf = emptyNode Null Null
 
 nullNode :: Tree a -> Bool
 nullNode Null = True             
@@ -26,26 +34,55 @@ isLeaf _  = False
 nSpaces :: Int -> String
 nSpaces n = take n $ repeat ' '
 
-printTree :: (Show a) => Tree a -> IO ()
+-- Pretty Prints the tree
+printTree :: (Show a) => Tree a -> IO (Tree a)
 printTree = printTreeAux 0
-    where printTreeAux n Null = return ()
+    where printTreeAux n Null = do
+            putStrLn (nSpaces n ++ "$")
+            return Null
           printTreeAux n (Node (Just x) l r) = do
             putStrLn (nSpaces n ++ (show x))
             printTreeAux (n + 2) l
             printTreeAux (n + 2) r
+            return (Node (Just x) l r)
           printTreeAux n (Node Nothing l r) = do
-            putStrLn (nSpaces n ++ "$")
+            putStrLn (nSpaces n ++ "''")
             printTreeAux (n + 2) l
             printTreeAux (n + 2) r
+            return (Node Nothing l r)
                          
-encodeTree :: Tree a -> [(a, [Int])]
+-- Take a List of 0s and 1s and convert it into a byte
+bitsToByte :: [Int] -> Int
+bitsToByte bits = 
+    foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip bits exps
+    where exps = reverse [0..(length bits - 1)]
+                         
+-- Given a Huffman tree. Create an assoc list of (symbol, encoding)
+encodeTree :: Tree a -> [(a, [Direction])]
 encodeTree tree = 
     let encoding = treeEncodingAux [] [] tree
     in map (\(Just x, en) -> (x, en)) encoding
     where treeEncodingAux enc bits (Node (Just x) _ _) = (Just x, bits):enc
           treeEncodingAux enc bits (Node Nothing l r) = lres ++ rres
-              where lres = (treeEncodingAux enc (0:bits) l)
-                    rres = (treeEncodingAux enc (1:bits) r)
+              where lres = (treeEncodingAux enc (LDir:bits) l)
+                    rres = (treeEncodingAux enc (RDir:bits) r)
+                           
+-- Decode a given symbol
+-- Takes a (symbol, encoding) pair and returns a tree with that symbol as a leaf node
+decodeSymbol :: (a, [Direction]) -> Tree a -> Tree a
+decodeSymbol path Null = 
+    decodeSymbol path emptyLeaf
+decodeSymbol (sym, b:bs) (Node x l r) = 
+    case b of
+      LDir -> Node x (decodeSymbol (sym, bs) l) r
+      RDir -> Node x l (decodeSymbol (sym, bs) r)
+decodeSymbol (sym, []) _ = leafNode sym
+
+bitsPath :: [Int] -> [Direction]
+bitsPath = map toEnum 
+
+decodeTree :: [(a, [Direction])] -> Tree a
+decodeTree = foldr decodeSymbol Null
 
 listToPQ :: (Ord k) => [(k, a)] -> PQueue.MinPQueue k (Tree a)
 listToPQ = PQueue.fromList . map (\(k, x) -> (k, leafNode x))
