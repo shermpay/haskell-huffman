@@ -5,7 +5,7 @@
 import Data.Word
 import qualified Data.Map as Map
 import qualified Data.PQueue.Prio.Min as PQueue
-import qualified Data.Bits as Bits
+import qualified Data.Bits.Bitwise as Bitwise
 
 import qualified Data.List as List
 import qualified System.Environment as Env
@@ -19,6 +19,13 @@ data Tree a = Null
 data Direction = LDir
                | RDir
                  deriving (Show, Enum)
+
+type Path = [Direction]
+    
+type Bits = [Bool]
+type Encoding k = Map.Map k Bits
+type Decoding v = Map.Map Bits v
+
                        
 leafNode :: a -> Tree a
 leafNode x = Node (Just x) Null Null
@@ -58,7 +65,7 @@ printTree = printTreeAux 0
             return (Node Nothing l r)
                          
 -- Given a Huffman tree. Create an assoc list of (symbol, encoding)
-encodeTree :: Tree a -> [(a, [Direction])]
+encodeTree :: Tree a -> [(a, Path)]
 encodeTree tree = 
     let encoding = treeEncodingAux [] [] tree
     in map (\(Just x, en) -> (x, en)) encoding
@@ -69,7 +76,7 @@ encodeTree tree =
                            
 -- Decode a given symbol
 -- Takes a (symbol, encoding) pair and returns a tree with that symbol as a leaf node
-decodeSymbol :: (a, [Direction]) -> Tree a -> Tree a
+decodeSymbol :: (a, Path) -> Tree a -> Tree a
 decodeSymbol path Null = 
     decodeSymbol path emptyLeaf
 decodeSymbol (sym, b:bs) (Node x l r) = 
@@ -78,14 +85,14 @@ decodeSymbol (sym, b:bs) (Node x l r) =
       RDir -> Node x l (decodeSymbol (sym, bs) r)
 decodeSymbol (sym, []) _ = leafNode sym
 
-bitsPath :: [Int] -> [Direction]
-bitsPath = map toEnum 
+bitsPath :: Bits -> Path
+bitsPath = map (toEnum . fromEnum)
            
-pathBits :: [Direction] -> [Int]
-pathBits = map fromEnum 
+pathBits :: Path -> Bits
+pathBits = map (toEnum . fromEnum)
 
 -- Decode an encoding into a Huffman tree
-decodeTree :: [(a, [Direction])] -> Tree a
+decodeTree :: [(a, Path)] -> Tree a
 decodeTree = foldr decodeSymbol Null
 
 listToPQ :: (Ord a) => [(k, a)] -> PQueue.MinPQueue a (Tree k)
@@ -118,36 +125,62 @@ listToTree :: (Ord k, Ord a, Num a) => [(k, a)] -> (Tree k)
 listToTree = pqToTree . listToPQ
              
 -- Take a List of 0s and 1s and convert it into a byte
-bitsToByte :: [Int] -> Word8
+bitsToByte :: Bits -> Word8
 bitsToByte bits = 
-    fromIntegral $ foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip bits exps
+    fromIntegral $ foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip (map fromEnum bits) exps
     where exps = reverse [0..(length bits - 1)]
                          
-huffmanTree :: (Ord k) => [k] -> Tree k
-huffmanTree = pqToTree . mapToPQ . countFreqs
+-- Takes a EOF character and a list of characters
+huffmanTree :: (Ord k) => k -> [k] -> Tree k
+huffmanTree eof = pqToTree . mapToPQ . (addEOF eof) . countFreqs
                 
-type Encoding k = Map.Map k Word8
-type Decoding v = Map.Map Word8 v
+-- Takes a huffmanTree and encodes it
+huffmanEncode :: (Ord a) => Tree a -> (Encoding a, Decoding a)
+huffmanEncode tree = 
+    (Map.fromList $ map (\(x, dirs) -> (x, pathBits dirs)) alist,
+     Map.fromList $ map (\(x, dirs) -> (pathBits dirs, x)) alist)
+    where alist = encodeTree tree
 
-huffmanEncode :: (Ord k) => [k] -> Encoding k
-huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, bitsToByte $ pathBits dirs)) . encodeTree . huffmanTree
+toBits :: (Ord k) => Encoding k -> k -> Bits
+toBits = (Map.!) 
 
-huffmanDecode :: (Ord k) => [k] -> Decoding k
-huffmanDecode = Map.fromList . map (\(x, dirs) -> (bitsToByte $ pathBits dirs, x)) . encodeTree . huffmanTree
-               
-compressOne :: (Ord k) => Encoding k -> k -> Word8
-compressOne = (Map.!) 
-    
+flattenBits :: [Bits] -> Bits
+flattenBits = foldr (++) []
+
+padBits :: Bits -> Bits
+padBits bits = 
+    case r of
+      0 -> bits
+      _ -> bits ++ (take r $ repeat False)
+    where r = 8 - (length bits `mod` 8)
+
+splitBits :: Bits -> [Bits]
+splitBits bits = 
+    if length bits == 0 then
+        []
+    else
+        if length bits `mod` 8 /= 0 then
+            error "length of bits should be multiple of 8"
+        else
+            b:splitBits(bs)
+            where (b, bs) = (splitAt 8 bits)
+
 compress :: Encoding Char -> String -> B.ByteString
-compress encoding = B.pack . map (compressOne encoding)
+compress encoding = 
+    B.pack . map bitsToByte . splitBits . padBits . flattenBits . map (toBits encoding)
                     
-decompressOne :: (Ord k) => Decoding k -> Word8 -> k
-decompressOne = (Map.!) 
-decompress :: Decoding Char -> B.ByteString -> String
-decompress decoding = map (decompressOne decoding) . B.unpack 
+-- fromBits :: (Ord k) => Decoding k -> Bits -> k
+-- fromBits = (Map.!) 
+
+-- decompress :: Decoding Char -> B.ByteString -> String
+-- decompress decoding = map map (fromBits decoding) . B.unpack 
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
+
+defaultEOF = '\0'
+addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
+addEOF eof = Map.insert eof 1
 
 usage :: IO()
 usage = do
@@ -159,11 +192,11 @@ main = do
   args <- Env.getArgs
   case length args of
     1 -> do contents <- IO.readFile fileName
-            let encoding = huffmanEncode contents
-                decoding = huffmanDecode contents
+            let tree = huffmanTree defaultEOF contents
+                (encoding, decoding) = huffmanEncode tree
                 compressed = compress encoding contents
-                decompressed = decompress decoding compressed
-            putStrLn decompressed
+                -- decompressed = decompress decoding compressed
+            -- putStrLn decompressed
             return ()
         where fileName = args !! 0
     _ -> usage 
