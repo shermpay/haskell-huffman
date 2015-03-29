@@ -2,14 +2,15 @@
 -- Sunday, 22. March 2015
 -- Huffman Tree
 
+import Data.Word
 import qualified Data.Map as Map
 import qualified Data.PQueue.Prio.Min as PQueue
 import qualified Data.Bits as Bits
 
-
 import qualified Data.List as List
 import qualified System.Environment as Env
 import qualified System.IO as IO
+import qualified Data.ByteString.Lazy as B
 
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
@@ -55,12 +56,6 @@ printTree = printTreeAux 0
             printTreeAux (n + 2) l
             printTreeAux (n + 2) r
             return (Node Nothing l r)
-                         
--- Take a List of 0s and 1s and convert it into a byte
-bitsToByte :: [Int] -> Int
-bitsToByte bits = 
-    foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip bits exps
-    where exps = reverse [0..(length bits - 1)]
                          
 -- Given a Huffman tree. Create an assoc list of (symbol, encoding)
 encodeTree :: Tree a -> [(a, [Direction])]
@@ -122,11 +117,34 @@ pqToTree pq =
 listToTree :: (Ord k, Ord a, Num a) => [(k, a)] -> (Tree k)
 listToTree = pqToTree . listToPQ
              
+-- Take a List of 0s and 1s and convert it into a byte
+bitsToByte :: [Int] -> Word8
+bitsToByte bits = 
+    fromIntegral $ foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip bits exps
+    where exps = reverse [0..(length bits - 1)]
+                         
 huffmanTree :: (Ord k) => [k] -> Tree k
 huffmanTree = pqToTree . mapToPQ . countFreqs
                 
-huffmanEncode :: (Ord k) => [k] -> Map.Map k [Int]
-huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, pathBits dirs)) . encodeTree . huffmanTree
+type Encoding k = Map.Map k Word8
+type Decoding v = Map.Map Word8 v
+
+huffmanEncode :: (Ord k) => [k] -> Encoding k
+huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, bitsToByte $ pathBits dirs)) . encodeTree . huffmanTree
+
+huffmanDecode :: (Ord k) => [k] -> Decoding k
+huffmanDecode = Map.fromList . map (\(x, dirs) -> (bitsToByte $ pathBits dirs, x)) . encodeTree . huffmanTree
+               
+compressOne :: (Ord k) => Encoding k -> k -> Word8
+compressOne = (Map.!) 
+    
+compress :: Encoding Char -> String -> B.ByteString
+compress encoding = B.pack . map (compressOne encoding)
+                    
+decompressOne :: (Ord k) => Decoding k -> Word8 -> k
+decompressOne = (Map.!) 
+decompress :: Decoding Char -> B.ByteString -> String
+decompress decoding = map (decompressOne decoding) . B.unpack 
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
@@ -142,7 +160,10 @@ main = do
   case length args of
     1 -> do contents <- IO.readFile fileName
             let encoding = huffmanEncode contents
-            print encoding
+                decoding = huffmanDecode contents
+                compressed = compress encoding contents
+                decompressed = decompress decoding compressed
+            putStrLn decompressed
             return ()
         where fileName = args !! 0
     _ -> usage 
