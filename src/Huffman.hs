@@ -63,8 +63,8 @@ printTree = printTreeAux 0
             return (Node Nothing l r)
                          
 -- Given a Huffman tree. Create an assoc list of (symbol, encoding)
-encodeTree :: Tree a -> [(a, Path)]
-encodeTree tree = 
+huffmanAList :: Tree a -> [(a, Path)]
+huffmanAList tree = 
     let encoding = treeEncodingAux [] [] tree
     in map (\(Just x, en) -> (x, reverse en)) encoding
     where treeEncodingAux enc bits (Node (Just x) _ _) = (Just x, bits):enc
@@ -74,14 +74,14 @@ encodeTree tree =
                            
 -- Decode a given symbol
 -- Takes a (symbol, encoding) pair and returns a tree with that symbol as a leaf node
-decodeSymbol :: (a, Path) -> Tree a -> Tree a
-decodeSymbol path Null = 
-    decodeSymbol path emptyLeaf
-decodeSymbol (sym, b:bs) (Node x l r) = 
+huffmanToSymbol :: (a, Path) -> Tree a -> Tree a
+huffmanToSymbol path Null = 
+    huffmanToSymbol path emptyLeaf
+huffmanToSymbol (sym, b:bs) (Node x l r) = 
     case b of
-      LDir -> Node x (decodeSymbol (sym, bs) l) r
-      RDir -> Node x l (decodeSymbol (sym, bs) r)
-decodeSymbol (sym, []) _ = leafNode sym
+      LDir -> Node x (huffmanToSymbol (sym, bs) l) r
+      RDir -> Node x l (huffmanToSymbol (sym, bs) r)
+huffmanToSymbol (sym, []) _ = leafNode sym
 
 bitsPath :: Bits -> Path
 bitsPath = map (toEnum . fromEnum)
@@ -90,8 +90,8 @@ pathBits :: Path -> Bits
 pathBits = map (toEnum . fromEnum)
 
 -- Decode an encoding into a Huffman tree
-decodeTree :: [(a, Path)] -> Tree a
-decodeTree = foldr decodeSymbol Null
+huffmanToTree :: [(a, Path)] -> Tree a
+huffmanToTree = foldr huffmanToSymbol Null
              
 getSymbol :: Path -> Tree a -> (a, Path)
 getSymbol path (Node m l r) =
@@ -153,8 +153,8 @@ huffmanTree :: (Ord k) => k -> [k] -> Tree k
 huffmanTree eof = pqToTree . mapToPQ . (addEOF eof) . countFreqs
                 
 -- Takes a huffmanTree and encodes it
-huffmanEncode :: (Ord a) => Tree a -> Encoding a
-huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, pathBits dirs)) . encodeTree
+huffmanMap :: (Ord a) => Tree a -> Encoding a
+huffmanMap = Map.fromList . map (\(x, dirs) -> (x, pathBits dirs)) . huffmanAList
 
 toBits :: (Ord k) => Encoding k -> k -> Bits
 toBits = (Map.!) 
@@ -188,6 +188,10 @@ decompress :: Tree Char -> B.ByteString -> String
 decompress tree bs = 
     getSymbols path tree
     where path = bitsPath $ (flattenBits . (map Bitwise.toListLE) . B.unpack) bs
+                 
+encodeTree :: Tree Char -> String
+encodeTree (Node (Just x) _ _) = ['1', x]
+encodeTree (Node Nothing l r) = '0':(encodeTree l) ++ (encodeTree r)
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
@@ -195,22 +199,38 @@ countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
 defaultEOF = '\0'
 addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
 addEOF eof = Map.insert eof 1
+             
+-- Compress a file given the filename
+compressFile :: [String] -> IO ()
+compressFile [inFile, outFile] = do
+  contents <- IO.readFile inFile
+  let tree =  huffmanTree defaultEOF contents
+      encoding = huffmanMap tree
+      compressed = compress encoding (contents ++ [defaultEOF])
+      treeEncoding = encodeTree tree
+  IO.writeFile outFile treeEncoding
+  B.appendFile outFile compressed
+             
+options = [("-c", "Compress a file"), ("-d", "Decompress a file")]
+          
+printOptions :: IO ()
+printOptions = do
+  mapM_ (\(f, h) -> do putStrLn $ ("  " ++ f ++ "\t" ++ h)) options
 
-usage :: IO()
-usage = do
+usage :: [String] -> IO ()
+usage _ = do
   progName <- Env.getProgName
-  putStrLn $ foldr (++) "" $ List.intersperse " " ["Usage:", "./" ++ progName, "FILE"]
+  putStrLn $ foldr (++) "" $ List.intersperse " " ["Usage:", "./" ++ progName
+                                                  , "[option]", "[args..]"]
+  printOptions
+  
+execOpt :: String -> [String] -> IO ()
+execOpt "-c" = compressFile
+execOpt _ = usage
 
-main :: IO()
+main :: IO ()
 main = do
   args <- Env.getArgs
   case length args of
-    1 -> do contents <- IO.readFile fileName
-            let tree = huffmanTree defaultEOF contents
-                encoding = huffmanEncode tree
-                compressed = compress encoding (contents ++ [defaultEOF])
-                decompressed = decompress tree compressed
-            putStr decompressed
-            return ()
-        where fileName = args !! 0
-    _ -> usage 
+    3 -> execOpt (args !! 0) (tail args)
+    _ -> usage []
