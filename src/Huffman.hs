@@ -11,6 +11,8 @@ import qualified Data.List as List
 import qualified System.Environment as Env
 import qualified System.IO as IO
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Char as C
 
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
@@ -192,11 +194,24 @@ decompress tree bs =
 encodeTree :: Tree Char -> String
 encodeTree (Node (Just x) _ _) = ['1', x]
 encodeTree (Node Nothing l r) = '0':(encodeTree l) ++ (encodeTree r)
+-- encodeTree Null = ""
+-- encodeTree (Node _ l r) = (aux l) ++ (aux r) ++ (encodeTree l) ++ (encodeTree r)
+--     where aux (Node (Just x) _ _) = ['1', x]
+--           aux (Node Nothing _ _) = "0"
+--           aux Null = ""
+                                
+decodeTree :: String -> Tree Char
+decodeTree str = 
+    fst $ aux str
+    where aux ('0':xs) = (emptyNode left right, rs)
+              where (left, ls) = aux xs
+                    (right, rs) = aux ls
+          aux ('1':x:xs) = (leafNode x, xs)
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
 
-defaultEOF = '\0'
+defaultEOF = C.chr (fromIntegral (maxBound :: Word8) :: Int)
 addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
 addEOF eof = Map.insert eof 1
              
@@ -208,8 +223,19 @@ compressFile [inFile, outFile] = do
       encoding = huffmanMap tree
       compressed = compress encoding (contents ++ [defaultEOF])
       treeEncoding = encodeTree tree
-  IO.writeFile outFile treeEncoding
+  IO.writeFile outFile $ ((show $ length treeEncoding) ++ " ")
+  IO.appendFile outFile treeEncoding
   B.appendFile outFile compressed
+   
+decompressFile :: [String] -> IO ()
+decompressFile [inFile, outFile] = do
+  contents <- IO.readFile inFile
+  let (treeLenStr, _:rest) = span (/= ' ') contents
+      treeLen = read treeLenStr :: Int
+      (treeStr, body) = splitAt treeLen rest
+      tree = decodeTree treeStr
+      output = decompress tree $ BC.pack body
+  IO.writeFile outFile output
              
 options = [("-c", "Compress a file"), ("-d", "Decompress a file")]
           
@@ -226,6 +252,7 @@ usage _ = do
   
 execOpt :: String -> [String] -> IO ()
 execOpt "-c" = compressFile
+execOpt "-d" = decompressFile
 execOpt _ = usage
 
 main :: IO ()
@@ -234,3 +261,14 @@ main = do
   case length args of
     3 -> execOpt (args !! 0) (tail args)
     _ -> usage []
+
+         
+myTree = emptyNode 
+         (emptyNode 
+          (leafNode 'A')
+          (leafNode 'C'))
+         (emptyNode 
+          (leafNode 'E')
+          (emptyNode
+           (leafNode 'B')
+           (leafNode 'D')))
