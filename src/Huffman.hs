@@ -13,6 +13,7 @@ import qualified System.IO as IO
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Char as C
+import Data.Int
 
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
@@ -225,15 +226,18 @@ compressFile [inFile, outFile] = do
       treeEncoding = encodeTree tree
   IO.writeFile outFile $ ((show $ length treeEncoding) ++ " ")
   IO.appendFile outFile treeEncoding
-  B.appendFile outFile compressed
+  IO.appendFile outFile $ BC.unpack compressed
    
 decompressFile :: [String] -> IO ()
 decompressFile [inFile, outFile] = do
   contents <- IO.readFile inFile
+  byteContents <- B.readFile inFile
   let (treeLenStr, _:rest) = span (/= ' ') contents
       treeLen = read treeLenStr :: Int
       (treeStr, body) = splitAt treeLen rest
       tree = decodeTree treeStr
+      brest = BC.dropWhile (/= ' ') byteContents
+      (_, bbody) = BC.splitAt (fromIntegral treeLen :: Int64) $ BC.tail brest
       output = decompress tree $ BC.pack body
   IO.writeFile outFile output
              
