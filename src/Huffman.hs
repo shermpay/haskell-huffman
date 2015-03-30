@@ -24,8 +24,6 @@ type Path = [Direction]
     
 type Bits = [Bool]
 type Encoding k = Map.Map k Bits
-type Decoding v = Map.Map Bits v
-
                        
 leafNode :: a -> Tree a
 leafNode x = Node (Just x) Null Null
@@ -68,7 +66,7 @@ printTree = printTreeAux 0
 encodeTree :: Tree a -> [(a, Path)]
 encodeTree tree = 
     let encoding = treeEncodingAux [] [] tree
-    in map (\(Just x, en) -> (x, en)) encoding
+    in map (\(Just x, en) -> (x, reverse en)) encoding
     where treeEncodingAux enc bits (Node (Just x) _ _) = (Just x, bits):enc
           treeEncodingAux enc bits (Node Nothing l r) = lres ++ rres
               where lres = (treeEncodingAux enc (LDir:bits) l)
@@ -94,6 +92,28 @@ pathBits = map (toEnum . fromEnum)
 -- Decode an encoding into a Huffman tree
 decodeTree :: [(a, Path)] -> Tree a
 decodeTree = foldr decodeSymbol Null
+             
+getSymbol :: Path -> Tree a -> (a, Path)
+getSymbol path (Node m l r) =
+    case m of
+      Just x -> (x, path)
+      Nothing -> 
+          case path of
+            LDir:dirs -> getSymbol dirs l
+            RDir:dirs -> getSymbol dirs r
+            [] -> error "End of path. Leaf not found"
+getSymbol _ Null = error "Tree invalid. reached Null node"
+                   
+getSymbols :: Path -> Tree Char -> String
+getSymbols path tree = 
+    if null path then
+        ""
+    else
+        if sym /= defaultEOF then
+            sym:(getSymbols ps tree)
+        else
+            ""
+        where (sym, ps) = getSymbol path tree
 
 listToPQ :: (Ord a) => [(k, a)] -> PQueue.MinPQueue a (Tree k)
 listToPQ = PQueue.fromList . map (\(k, x) -> (x, leafNode k))
@@ -126,20 +146,15 @@ listToTree = pqToTree . listToPQ
              
 -- Take a List of 0s and 1s and convert it into a byte
 bitsToByte :: Bits -> Word8
-bitsToByte bits = 
-    fromIntegral $ foldr (\(x, e) sum -> x * 2^e + sum) 0 $ zip (map fromEnum bits) exps
-    where exps = reverse [0..(length bits - 1)]
+bitsToByte  = Bitwise.fromListLE
                          
 -- Takes a EOF character and a list of characters
 huffmanTree :: (Ord k) => k -> [k] -> Tree k
 huffmanTree eof = pqToTree . mapToPQ . (addEOF eof) . countFreqs
                 
 -- Takes a huffmanTree and encodes it
-huffmanEncode :: (Ord a) => Tree a -> (Encoding a, Decoding a)
-huffmanEncode tree = 
-    (Map.fromList $ map (\(x, dirs) -> (x, pathBits dirs)) alist,
-     Map.fromList $ map (\(x, dirs) -> (pathBits dirs, x)) alist)
-    where alist = encodeTree tree
+huffmanEncode :: (Ord a) => Tree a -> Encoding a
+huffmanEncode = Map.fromList . map (\(x, dirs) -> (x, pathBits dirs)) . encodeTree
 
 toBits :: (Ord k) => Encoding k -> k -> Bits
 toBits = (Map.!) 
@@ -168,12 +183,11 @@ splitBits bits =
 compress :: Encoding Char -> String -> B.ByteString
 compress encoding = 
     B.pack . map bitsToByte . splitBits . padBits . flattenBits . map (toBits encoding)
-                    
--- fromBits :: (Ord k) => Decoding k -> Bits -> k
--- fromBits = (Map.!) 
 
--- decompress :: Decoding Char -> B.ByteString -> String
--- decompress decoding = map map (fromBits decoding) . B.unpack 
+decompress :: Tree Char -> B.ByteString -> String
+decompress tree bs = 
+    getSymbols path tree
+    where path = bitsPath $ (flattenBits . (map Bitwise.toListLE) . B.unpack) bs
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
 countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
@@ -193,10 +207,10 @@ main = do
   case length args of
     1 -> do contents <- IO.readFile fileName
             let tree = huffmanTree defaultEOF contents
-                (encoding, decoding) = huffmanEncode tree
-                compressed = compress encoding contents
-                -- decompressed = decompress decoding compressed
-            -- putStrLn decompressed
+                encoding = huffmanEncode tree
+                compressed = compress encoding (contents ++ [defaultEOF])
+                decompressed = decompress tree compressed
+            putStr decompressed
             return ()
         where fileName = args !! 0
     _ -> usage 
