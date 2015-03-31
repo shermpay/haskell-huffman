@@ -14,7 +14,7 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Char as C
 import Data.Int
-
+    
 data Tree a = Null
             | Node (Maybe a) (Tree a) (Tree a)
               deriving (Show, Eq)
@@ -172,7 +172,6 @@ padBits bits =
       _ -> bits ++ (take r $ repeat False)
     where r = 8 - (length bits `mod` 8)
 
--- TODO: BOTTLENECK
 splitBits :: Bits -> [Bits]
 splitBits [] = []
 splitBits bits = 
@@ -246,7 +245,9 @@ defaultEOF = C.chr (fromIntegral (maxBound :: Word8) :: Int)
 addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
 addEOF eof = Map.insert eof 1
              
-options = [("-c", "Compress a file"), ("-d", "Decompress a file")]
+options = [("-c", "Compress a file")
+          , ("-d", "Decompress a file")
+          , ("-h", "Print this usage")]
           
 printOptions :: IO ()
 printOptions = do
@@ -256,12 +257,13 @@ usage :: [String] -> IO ()
 usage _ = do
   progName <- Env.getProgName
   putStrLn $ foldr (++) "" $ List.intersperse " " ["Usage:", "./" ++ progName
-                                                  , "[option]", "[args..]"]
+                                                  , "[OPTION]", "[INFILE] [OUTFILE]"]
   printOptions
   
 execOpt :: String -> [String] -> IO ()
 execOpt "-c" = compressFile
 execOpt "-d" = decompressFile
+execOpt "-h" = usage
 execOpt _ = usage
 
 main :: IO ()
