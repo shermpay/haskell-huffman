@@ -222,7 +222,7 @@ compressFile [inFile, outFile] = do
       encoding = huffmanMap tree
       compressed = (compress $! encoding) $! (contents ++ [defaultEOF])
       treeEncoding = encodeTree tree
-  putStrLn "Compressing: " ++ inFile ++ "..."
+  putStrLn $ "Compressing: " ++ inFile ++ "..."
   B.writeFile outFile $ BC.pack $ ((show $ length treeEncoding) ++ " ")
   B.appendFile outFile $ BC.pack treeEncoding
   B.appendFile outFile compressed
@@ -236,7 +236,7 @@ decompressFile [inFile, outFile] = do
       (treeStr, body) = BC.splitAt treeLen $ BC.tail rest
       tree = decodeTree $ BC.unpack treeStr
       output = decompress tree body
-  putStrLn "Decompressing: " ++ inFile ++ "..."
+  putStrLn $ "Decompressing: " ++ inFile ++ "..."
   B.writeFile outFile $ BC.pack output
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
