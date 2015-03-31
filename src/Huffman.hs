@@ -149,7 +149,7 @@ listToTree = pqToTree . listToPQ
              
 -- Take a List of 0s and 1s and convert it into a byte
 bitsToByte :: Bits -> Word8
-bitsToByte  = Bitwise.fromListLE
+bitsToByte = Bitwise.fromListLE
                          
 -- Takes a EOF character and a list of characters
 huffmanTree :: (Ord k) => k -> [k] -> Tree k
@@ -172,18 +172,28 @@ padBits bits =
       _ -> bits ++ (take r $ repeat False)
     where r = 8 - (length bits `mod` 8)
 
+-- TODO: BOTTLENECK
 splitBits :: Bits -> [Bits]
+splitBits [] = []
 splitBits bits = 
-    if length bits == 0 then
-        []
-    else
-        if length bits `mod` 8 /= 0 then
-            error "length of bits should be multiple of 8"
-        else
-            b:splitBits(bs)
-            where (b, bs) = (splitAt 8 bits)
+    b:splitBits bs
+    where (b, bs) = (splitAt 8 bits)
 
-compress :: Encoding Char -> String -> B.ByteString
+splitBits' :: Bits -> [Bits]
+splitBits' bits = 
+    reverse $ aux bits []
+    where aux [] acc = acc
+          aux bits acc = 
+              aux bs (b:acc)
+              where (b, bs) = (splitAt 8 bits)
+
+mapN :: ([a] -> b) -> Int -> [a] -> [b]
+mapN f n [] = []
+mapN f n lst =
+    (f x):(mapN f n xs)
+    where (x, xs) = (splitAt n lst)
+
+-- compress :: Encoding Char -> String -> B.ByteString
 compress encoding = 
     B.pack . map bitsToByte . splitBits . padBits . flattenBits . map (toBits encoding)
 
@@ -195,11 +205,6 @@ decompress tree bs =
 encodeTree :: Tree Char -> String
 encodeTree (Node (Just x) _ _) = ['1', x]
 encodeTree (Node Nothing l r) = '0':(encodeTree l) ++ (encodeTree r)
--- encodeTree Null = ""
--- encodeTree (Node _ l r) = (aux l) ++ (aux r) ++ (encodeTree l) ++ (encodeTree r)
---     where aux (Node (Just x) _ _) = ['1', x]
---           aux (Node Nothing _ _) = "0"
---           aux Null = ""
                                 
 decodeTree :: String -> Tree Char
 decodeTree str = 
@@ -209,37 +214,37 @@ decodeTree str =
                     (right, rs) = aux ls
           aux ('1':x:xs) = (leafNode x, xs)
 
-countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
-countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
-
-defaultEOF = C.chr (fromIntegral (maxBound :: Word8) :: Int)
-addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
-addEOF eof = Map.insert eof 1
-             
 -- Compress a file given the filename
 compressFile :: [String] -> IO ()
 compressFile [inFile, outFile] = do
   contents <- IO.readFile inFile
   let tree =  huffmanTree defaultEOF contents
       encoding = huffmanMap tree
-      compressed = compress encoding (contents ++ [defaultEOF])
+      compressed = (compress $! encoding) $! (contents ++ [defaultEOF])
       treeEncoding = encodeTree tree
-  IO.writeFile outFile $ ((show $ length treeEncoding) ++ " ")
-  IO.appendFile outFile treeEncoding
-  IO.appendFile outFile $ BC.unpack compressed
+  putStrLn "Compressing: " ++ inFile ++ "..."
+  B.writeFile outFile $ BC.pack $ ((show $ length treeEncoding) ++ " ")
+  B.appendFile outFile $ BC.pack treeEncoding
+  B.appendFile outFile compressed
    
 decompressFile :: [String] -> IO ()
 decompressFile [inFile, outFile] = do
-  contents <- IO.readFile inFile
+  -- contents <- IO.readFile inFile
   byteContents <- B.readFile inFile
-  let (treeLenStr, _:rest) = span (/= ' ') contents
-      treeLen = read treeLenStr :: Int
-      (treeStr, body) = splitAt treeLen rest
-      tree = decodeTree treeStr
-      brest = BC.dropWhile (/= ' ') byteContents
-      (_, bbody) = BC.splitAt (fromIntegral treeLen :: Int64) $ BC.tail brest
-      output = decompress tree $ BC.pack body
-  IO.writeFile outFile output
+  let (treeLenStr, rest) = BC.span (/= ' ') byteContents
+      treeLen = read (BC.unpack treeLenStr) :: Int64
+      (treeStr, body) = BC.splitAt treeLen $ BC.tail rest
+      tree = decodeTree $ BC.unpack treeStr
+      output = decompress tree body
+  putStrLn "Decompressing: " ++ inFile ++ "..."
+  B.writeFile outFile $ BC.pack output
+
+countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
+countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
+
+defaultEOF = C.chr (fromIntegral (maxBound :: Word8) :: Int)
+addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
+addEOF eof = Map.insert eof 1
              
 options = [("-c", "Compress a file"), ("-d", "Decompress a file")]
           
@@ -266,13 +271,17 @@ main = do
     3 -> execOpt (args !! 0) (tail args)
     _ -> usage []
 
-         
-myTree = emptyNode 
-         (emptyNode 
-          (leafNode 'A')
-          (leafNode 'C'))
-         (emptyNode 
-          (leafNode 'E')
-          (emptyNode
-           (leafNode 'B')
-           (leafNode 'D')))
+benchmark :: Int -> [Word8]
+benchmark n =
+    drop n $ mapN bitsToByte 8 (take n $ repeat True)
+    
+benchmarkMap :: Int -> [Bool]
+benchmarkMap n =
+    drop n $ map id (take n $ repeat True)
+
+myMap :: (a -> b) -> [a] -> [b]
+myMap f [] = []
+myMap f lst = 
+    (f x):(myMap f xs)
+    where ([x],xs) = splitAt 1 lst
+
