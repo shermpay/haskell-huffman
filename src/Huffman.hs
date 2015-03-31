@@ -190,12 +190,12 @@ splitBits' bits =
 mapN :: ([a] -> b) -> Int -> [a] -> [b]
 mapN f n [] = []
 mapN f n lst =
-    (f x):(mapN f n xs)
+    (:) (f $! x) $! (mapN f n xs)
     where (x, xs) = (splitAt n lst)
 
--- compress :: Encoding Char -> String -> B.ByteString
+compress :: Encoding Char -> String -> B.ByteString
 compress encoding = 
-    B.pack . map bitsToByte . splitBits . padBits . flattenBits . map (toBits encoding)
+    B.pack . mapN bitsToByte 8 . padBits . flattenBits . map (toBits encoding)
 
 decompress :: Tree Char -> B.ByteString -> String
 decompress tree bs = 
@@ -240,7 +240,7 @@ decompressFile [inFile, outFile] = do
   B.writeFile outFile $ BC.pack output
 
 countFreqs :: (Ord k, Ord a, Num a) => [k] -> Map.Map k a
-countFreqs = foldr (\x res -> Map.insertWith (+) x 1 res) Map.empty
+countFreqs = List.foldl' (\res x -> Map.insertWith (+) x 1 res) Map.empty
 
 defaultEOF = C.chr (fromIntegral (maxBound :: Word8) :: Int)
 addEOF :: (Ord k, Num a) => k -> Map.Map k a -> Map.Map k a
@@ -270,18 +270,3 @@ main = do
   case length args of
     3 -> execOpt (args !! 0) (tail args)
     _ -> usage []
-
-benchmark :: Int -> [Word8]
-benchmark n =
-    drop n $ mapN bitsToByte 8 (take n $ repeat True)
-    
-benchmarkMap :: Int -> [Bool]
-benchmarkMap n =
-    drop n $ map id (take n $ repeat True)
-
-myMap :: (a -> b) -> [a] -> [b]
-myMap f [] = []
-myMap f lst = 
-    (f x):(myMap f xs)
-    where ([x],xs) = splitAt 1 lst
-
